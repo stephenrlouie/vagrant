@@ -41,7 +41,7 @@ Vagrant.configure("2") do |config|
                 provision_vm(config, vm_name, i)
                 config.vm.provision "file", source: "scripts/pv2.yaml", destination: "/home/vagrant/pv2.yaml"
                 config.vm.provision "file", source: "provision_files/id_rsa.pub", destination: "/home/vagrant/id_rsa.pub"
-                config.vm.provision "file", source: "../coredns/central/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
+                config.vm.provision "file", source: "optikon-dns/plugin/central/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
                 if $num_clusters > 1
@@ -52,12 +52,16 @@ Vagrant.configure("2") do |config|
         else # Edge clusters
             config.vm.define vm_name = "%s-%01d" % ["edge", i-1] do |config|
                 provision_vm(config, vm_name, i)
-                config.vm.provision "file", source: "../coredns/edge/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
+                config.vm.provision "file", source: "optikon-dns/plugin/edge/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell,
                     path: "scripts/replace-env-vars.sh",
                     env: {"CENTRAL_IP" => "172.16.7.101", "LON" => $edge_cluster_coords[2*(i-2)], "LAT" => $edge_cluster_coords[2*(i-2)+1]}
                 config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
+                if i == 2 # Deploy echoserver on first edge cluster.
+                    config.vm.provision "file", source: "manifests/echoserver.yaml", destination: "/home/vagrant/echoserver.yaml"
+                    config.vm.provision :shell, inline: "kubectl create -f /home/vagrant/echoserver.yaml"
+                end
             end
         end
     end
