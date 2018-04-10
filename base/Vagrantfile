@@ -1,0 +1,32 @@
+# -*k mode: ruby -*-
+# vi: set ft=ruby :
+
+$ssh_setup = <<-SCRIPT
+yum -y update
+yum -y install wget-1.14-15.el7_4.1.x86_64
+wget --no-check-certificate https://raw.githubusercontent.com/mitchellh/vagrant/master/keys/vagrant.pub -O .ssh/authorized_keys
+chmod 700 .ssh
+chmod 600 .ssh/authorized_keys
+chown -R vagrant:vagrant .ssh
+SCRIPT
+
+Vagrant.configure("2") do |config|
+    config.vm.define vm_name = "base-cluster" do |config|
+        config.vm.hostname = vm_name
+        config.vm.box = "centos/7"
+        config.vm.box_version = "1802.01"
+        ip = "172.16.7.101"
+        config.vm.synced_folder ".", "/vagrant", disabled: true
+        config.vm.network :private_network, ip: ip
+        config.vm.provision :shell, inline: "ifup eth1"
+        config.vm.provider "virtualbox" do |vb|
+            vb.gui = false
+            vb.cpus = 3
+            vb.memory = "7000"
+        end
+        config.ssh.insert_key = false
+        config.vm.provision :shell, inline: $ssh_setup, privileged: true
+        config.vm.provision "shell", path: "scripts/kube-install.sh", privileged: true
+        config.vm.provision "shell", path: "scripts/install-helm.sh", privileged: true
+    end
+end
