@@ -7,4 +7,4 @@
 #   "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"date\":\"`date +'%s'`\"}}}}}"
 
 # Updates the CoreDNS image to be a custom image.
-kubectl -n kube-system set image deployment/coredns coredns=intelligent-edge-admin/coredns:1.0.0
+kubectl -n kube-system set image deployment/coredns coredns=dockerhub.cisco.com/intelligent-edge-dev-docker-local/optikon-dns:1.0.0
