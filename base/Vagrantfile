@@ -28,5 +28,6 @@ Vagrant.configure("2") do |config|
         config.vm.provision :shell, inline: $ssh_setup, privileged: true
         config.vm.provision "shell", path: "scripts/kube-install.sh", privileged: true
         config.vm.provision "shell", path: "scripts/install-helm.sh", privileged: true
+        config.vm.provision "shell", path: "scripts/ip-forward.sh", privileged: true
     end
 end
