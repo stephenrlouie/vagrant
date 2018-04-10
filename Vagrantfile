@@ -7,7 +7,7 @@ if ENV["NUM_CLUSTERS"] && ENV["NUM_CLUSTERS"].to_i > 0
 end
 
 $box = ENV["VM_NAME"] || "intelligent-edge-admin/centos-k8s-1.10.0"
-$box_version = ENV["VM_VERSION"] || "1.1.0"
+$box_version = ENV["VM_VERSION"] || "1.2.0"
 
 $central_cluster_coords = (ENV["CENTRAL_CLUSTER_COORDS"] || "55.692770,12.598624").split(/\s*,\s*/)
 $edge_cluster_coords = (ENV["EDGE_CLUSTER_COORDS"] || "55.680770,12.543006,55.664023,12.610126").split(/\s*,\s*/)
