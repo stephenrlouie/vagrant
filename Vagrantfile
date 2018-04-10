@@ -7,7 +7,7 @@ if ENV["NUM_CLUSTERS"] && ENV["NUM_CLUSTERS"].to_i > 0
 end
 
 $box = ENV["VM_NAME"] || "intelligent-edge-admin/centos-k8s-1.10.0"
-$box_version = ENV["VM_VERSION"] || "1.1.0"
+$box_version = ENV["VM_VERSION"] || "1.2.0"
 
 $central_cluster_coords = (ENV["CENTRAL_CLUSTER_COORDS"] || "55.692770,12.598624").split(/\s*,\s*/)
 $edge_cluster_coords = (ENV["EDGE_CLUSTER_COORDS"] || "55.680770,12.543006,55.664023,12.610126").split(/\s*,\s*/)
@@ -20,12 +20,12 @@ def provision_vm(config, vm_name, i)
     ip = "172.16.7.#{i+100}"
     config.vm.network :private_network, ip: ip
     config.vm.provision :shell, inline: "ifup eth1"
-    config.vm.provision "shell", path: "scripts/reset-kubeconfig.sh", env: {"MYIP" => ip}, privileged: true
+    config.vm.provision "shell", path: "scripts/reset-kube-config.sh", env: {"MYIP" => ip}, privileged: true
     config.vm.provision "file", source: "scripts/pv1.yaml", destination: "/home/vagrant/pv1.yaml"
     config.vm.provision "shell", path: "scripts/deploy-helm.sh",  privileged: true
     config.vm.provision "file", source: "provision_files/id_rsa", destination: "/home/vagrant/id_rsa"
     if i > 1
-      config.vm.provision "shell", path: "scripts/send-kubeconfig.sh", :args => i-1,  privileged: true
+        config.vm.provision "shell", path: "scripts/send-kubeconfig.sh", :args => i-1,  privileged: true
     end
 end
 
@@ -36,20 +36,28 @@ Vagrant.configure("2") do |config|
     end
 
     (1..$num_clusters).each do |i|
-        if i == 1 #do central FIRST
+        if i == 1 # Do Central cluster first
             config.vm.define vm_name = "central", primary: true do |config|
-            provision_vm(config, vm_name, i)
-            config.vm.provision "file", source: "scripts/pv2.yaml", destination: "/home/vagrant/pv2.yaml"
-            config.vm.provision "file", source: "provision_files/id_rsa.pub", destination: "/home/vagrant/id_rsa.pub"
-            if $num_clusters > 1
-              config.vm.provision "shell", path: "scripts/central-keys.sh", env: {"NUM_EDGE" => $num_clusters-1}, privileged: false
-              config.vm.provision "shell", path: "scripts/deploy-registry.sh", privileged: true
+                provision_vm(config, vm_name, i)
+                config.vm.provision "file", source: "scripts/pv2.yaml", destination: "/home/vagrant/pv2.yaml"
+                config.vm.provision "file", source: "provision_files/id_rsa.pub", destination: "/home/vagrant/id_rsa.pub"
+                config.vm.provision "file", source: "../coredns/central/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
+                config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
+                config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
+                if $num_clusters > 1
+                    config.vm.provision "shell", path: "scripts/central-keys.sh", env: {"NUM_EDGE" => $num_clusters-1}, privileged: false
+                    config.vm.provision "shell", path: "scripts/deploy-registry.sh", privileged: true
+                end
             end
-          end
-        else
-          # EDGE VM CLUSTERS
+        else # Edge clusters
             config.vm.define vm_name = "%s-%01d" % ["edge", i-1] do |config|
                 provision_vm(config, vm_name, i)
+                config.vm.provision "file", source: "../coredns/edge/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
+                config.vm.provision :shell,
+                    path: "scripts/replace-env-vars.sh",
+                    env: {"CENTRAL_IP" => "172.16.7.101", "LON" => $edge_cluster_coords[2*(i-2)], "LAT" => $edge_cluster_coords[2*(i-2)+1]}
+                config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
+                config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
             end
         end
     end
