@@ -1,0 +1,20 @@
+---
+# exposing tiller as a service
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: helm
+    name: tiller
+  name: tiller
+  namespace: kube-system
+spec:
+  type: NodePort
+  ports:
+  - name: api
+    port: 44134
+    protocol: TCP
+    nodePort: 30134
+  selector:
+    app: helm
+    name: tiller
