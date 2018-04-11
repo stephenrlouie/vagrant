@@ -22,6 +22,7 @@ def provision_vm(config, vm_name, i)
     config.vm.provision :shell, inline: "ifup eth1"
     config.vm.provision "shell", path: "scripts/reset-kube-config.sh", env: {"MYIP" => ip}, privileged: true
     config.vm.provision "file", source: "scripts/pv1.yaml", destination: "/home/vagrant/pv1.yaml"
+    config.vm.provision "file", source: "scripts/tiller.yaml", destination: "/home/vagrant/tiller.yaml"
     config.vm.provision "shell", path: "scripts/deploy-helm.sh",  privileged: true
     config.vm.provision "file", source: "provision_files/id_rsa", destination: "/home/vagrant/id_rsa"
     if i > 1
