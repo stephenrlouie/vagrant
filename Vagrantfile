@@ -25,9 +25,8 @@ def provision_vm(config, vm_name, i)
     config.vm.provision "file", source: "scripts/tiller.yaml", destination: "/home/vagrant/tiller.yaml"
     config.vm.provision "shell", path: "scripts/deploy-helm.sh",  privileged: true
     config.vm.provision "file", source: "provision_files/id_rsa", destination: "/home/vagrant/id_rsa"
-    if i > 1
-        config.vm.provision "shell", path: "scripts/send-kubeconfig.sh", :args => i-1,  privileged: true
-    end
+    config.vm.provision "file", source: "optikon-dns/kube-dns-svc.yaml", destination: "/home/vagrant/.coredns/kube-dns-svc.yaml"
+    config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/kube-dns-svc.yaml"
 end
 
 Vagrant.configure("2") do |config|
@@ -53,6 +52,7 @@ Vagrant.configure("2") do |config|
         else # Edge clusters
             config.vm.define vm_name = "%s-%01d" % ["edge", i-1] do |config|
                 provision_vm(config, vm_name, i)
+                config.vm.provision "shell", path: "scripts/send-kubeconfig.sh", :args => i-1,  privileged: true
                 config.vm.provision "file", source: "optikon-dns/plugin/edge/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell,
                     path: "scripts/replace-env-vars.sh",

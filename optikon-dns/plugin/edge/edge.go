@@ -1,14 +1,17 @@
 package edge
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
-	"strconv"
+	"io"
+	"time"
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/request"
+
 	"github.com/miekg/dns"
+	ot "github.com/opentracing/opentracing-go"
 	"golang.org/x/net/context"
 )
 
@@ -23,109 +26,183 @@ type Site struct {
 // Coords is a 2-tuple of longitude and latitude values.
 type Coords [2]float64
 
-// OptikonEdge is a plugin that returns your IP address, port and the
-// protocol used for connecting to CoreDNS.
+// OptikonEdge represents a plugin instance that can proxy requests to another (DNS) server. It has a list
+// of proxies each representing one upstream proxy.
 type OptikonEdge struct {
-	Next      plugin.Handler
-	coords    Coords
-	centralIP string
-	services  []string
+	proxies    []*Proxy
+	p          Policy
+	hcInterval time.Duration
+
+	from    string
+	ignored []string
+
+	tlsConfig     *tls.Config
+	tlsServerName string
+	maxfails      uint32
+	expire        time.Duration
+
+	forceTCP bool // also here for testing
+
+	Next plugin.Handler
+
+	coords   Coords
+	services []string
 }
 
 // New returns a new OptikonEdge.
 func New() *OptikonEdge {
-	oe := &OptikonEdge{}
+	oe := &OptikonEdge{maxfails: 2, tlsConfig: new(tls.Config), expire: defaultExpire, p: new(random), from: ".", hcInterval: hcDuration}
 	return oe
 }
 
-// ServeDNS implements the plugin.Handler interface.
-func (oe *OptikonEdge) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
-
-	// If the message is a response from Central, parse that response
-	// differently than a user query.
-	if r.Response {
-		return oe.parseCentralReply(&ctx, &w, r)
-	}
-
-	// Otherwise, the requester must be a user/client.
-	return oe.parseUserRequest(ctx, w, r)
+// SetProxy appends p to the proxy list and starts healthchecking.
+func (oe *OptikonEdge) SetProxy(p *Proxy) {
+	oe.proxies = append(oe.proxies, p)
+	p.start(oe.hcInterval)
 }
 
-// Parses a user's request to access a particular Kubernetes service.
-func (oe *OptikonEdge) parseUserRequest(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+// Len returns the number of configured proxies.
+func (oe *OptikonEdge) Len() int { return len(oe.proxies) }
 
-	// Forward the request to Central.
-	return plugin.NextOrFailure(oe.Name(), oe.Next, ctx, w, r)
-}
-
-// Parses the DNS reply back from the central cluster.
-func (oe *OptikonEdge) parseCentralReply(ctx *context.Context, w *dns.ResponseWriter, r *dns.Msg) (int, error) {
-
-	// TODO: Set a 0 TTL on the response back to the original requester.
-
-	// Assert an additional entry exists.
-	if len(r.Extra) == 0 {
-		return 1, errors.New("expected Extra entry to be non-empty")
-	}
-
-	// Extract the Table from the response.
-	tabString := r.Extra[0]
-	fmt.Println(tabString.String())
-
-	// Encapsolate the state of the request and reponse.
-	state := request.Request{W: *w, Req: r}
-
-	// Init a response to the user.
-	a := new(dns.Msg)
-	a.SetReply(state.Req)
-	a.Compress = true
-	a.Authoritative = true
-
-	ip := state.IP()
-	var rr dns.RR
-
-	switch state.Family() {
-	case 1:
-		rr = new(dns.A)
-		rr.(*dns.A).Hdr = dns.RR_Header{Name: state.QName(), Rrtype: dns.TypeA, Class: state.QClass()}
-		rr.(*dns.A).A = net.ParseIP(ip).To4()
-	case 2:
-		rr = new(dns.AAAA)
-		rr.(*dns.AAAA).Hdr = dns.RR_Header{Name: state.QName(), Rrtype: dns.TypeAAAA, Class: state.QClass()}
-		rr.(*dns.AAAA).AAAA = net.ParseIP(ip)
-	}
-
-	srv := new(dns.SRV)
-	srv.Hdr = dns.RR_Header{Name: "_" + state.Proto() + "." + state.QName(), Rrtype: dns.TypeSRV, Class: state.QClass()}
-	if state.QName() == "." {
-		srv.Hdr.Name = "_" + state.Proto() + state.QName()
-	}
-	port, _ := strconv.Atoi(state.Port())
-	srv.Port = uint16(port)
-	srv.Target = "."
-
-	a.Extra = []dns.RR{rr, srv}
-
-	state.SizeAndDo(a)
-	state.W.WriteMsg(a)
-
-	return 0, nil
-}
-
-// Name implements the Handler interface.
+// Name implements plugin.Handler.
 func (oe *OptikonEdge) Name() string { return "optikon-edge" }
 
-// SetCentralIP sets the IP address for the central cluster.
-func (oe *OptikonEdge) SetCentralIP(ip string) {
-	oe.centralIP = ip
-}
-
 // SetLon sets the edge site longitude.
-func (oe *OptikonEdge) SetLon(v float64) {
-	oe.coords[0] = v
-}
+func (oe *OptikonEdge) SetLon(v float64) { oe.coords[0] = v }
 
 // SetLat sets the edge site latitude.
-func (oe *OptikonEdge) SetLat(v float64) {
-	oe.coords[1] = v
+func (oe *OptikonEdge) SetLat(v float64) { oe.coords[1] = v }
+
+// ServeDNS implements plugin.Handler.
+func (oe *OptikonEdge) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+
+	fmt.Println("REQUEST:", r.String())
+
+	state := request.Request{W: w, Req: r}
+	if !oe.match(state) {
+		return plugin.NextOrFailure(oe.Name(), oe.Next, ctx, w, r)
+	}
+
+	fails := 0
+	var span, child ot.Span
+	var upstreamErr error
+	span = ot.SpanFromContext(ctx)
+
+	for _, proxy := range oe.list() {
+		if proxy.Down(oe.maxfails) {
+			fails++
+			if fails < len(oe.proxies) {
+				continue
+			}
+			// All upstream proxies are dead, assume healtcheck is completely broken and randomly
+			// select an upstream to connect to.
+			r := new(random)
+			proxy = r.List(oe.proxies)[0]
+
+			HealthcheckBrokenCount.Add(1)
+		}
+
+		if span != nil {
+			child = span.Tracer().StartSpan("connect", ot.ChildOf(span.Context()))
+			ctx = ot.ContextWithSpan(ctx, child)
+		}
+
+		var (
+			ret *dns.Msg
+			err error
+		)
+		stop := false
+		for {
+			ret, err = proxy.connect(ctx, state, oe.forceTCP, true)
+			if err != nil && err == io.EOF && !stop { // Remote side closed conn, can only happen with TCP.
+				stop = true
+				continue
+			}
+			break
+		}
+
+		if child != nil {
+			child.Finish()
+		}
+
+		ret, err = truncated(ret, err)
+		upstreamErr = err
+
+		if err != nil {
+			// Kick off health check to see if *our* upstream is broken.
+			if oe.maxfails != 0 {
+				proxy.Healthcheck()
+			}
+
+			if fails < len(oe.proxies) {
+				continue
+			}
+			break
+		}
+
+		// Check if the reply is correct; if not return FormErr.
+		if !state.Match(ret) {
+			formerr := state.ErrorMessage(dns.RcodeFormatError)
+			w.WriteMsg(formerr)
+			return 0, nil
+		}
+
+		ret.Compress = true
+		// When using force_tcp the upstream can send a message that is too big for
+		// the udp buffer, hence we need to truncate the message to at least make it
+		// fit the udp buffer.
+		ret, _ = state.Scrub(ret)
+
+		fmt.Println("PROXY REPLY MESSAGE:", ret.String())
+
+		w.WriteMsg(ret)
+
+		return 0, nil
+	}
+
+	if upstreamErr != nil {
+		return dns.RcodeServerFailure, upstreamErr
+	}
+
+	return dns.RcodeServerFailure, errNoHealthy
 }
+
+func (oe *OptikonEdge) match(state request.Request) bool {
+	from := oe.from
+
+	if !plugin.Name(from).Matches(state.Name()) || !oe.isAllowedDomain(state.Name()) {
+		return false
+	}
+
+	return true
+}
+
+func (oe *OptikonEdge) isAllowedDomain(name string) bool {
+	if dns.Name(name) == dns.Name(oe.from) {
+		return true
+	}
+
+	for _, ignore := range oe.ignored {
+		if plugin.Name(ignore).Matches(name) {
+			return false
+		}
+	}
+	return true
+}
+
+// List returns a set of proxies to be used for this client depending on the policy in oe.
+func (oe *OptikonEdge) list() []*Proxy { return oe.p.List(oe.proxies) }
+
+var (
+	errInvalidDomain = errors.New("invalid domain for forward")
+	errNoHealthy     = errors.New("no healthy proxies")
+	errNoOptikonEdge = errors.New("no optikon-edge defined")
+)
+
+// policy tells forward what policy for selecting upstream it uses.
+type policy int
+
+const (
+	randomPolicy policy = iota
+	roundRobinPolicy
+)
