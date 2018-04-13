@@ -2,29 +2,23 @@ package edge
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/request"
+	"wwwin-github.cisco.com/edge/optikon-dns/plugin/central"
 
 	"github.com/miekg/dns"
 	ot "github.com/opentracing/opentracing-go"
 	"golang.org/x/net/context"
 )
-
-// Site is a wrapper around all information needed about edge sites serving
-// content.
-type Site struct {
-	IP  string  `json:"ip"`
-	Lon float64 `json:"lon"`
-	Lat float64 `json:"lat"`
-}
-
-// Coords is a 2-tuple of longitude and latitude values.
-type Coords [2]float64
 
 // OptikonEdge represents a plugin instance that can proxy requests to another (DNS) server. It has a list
 // of proxies each representing one upstream proxy.
@@ -45,7 +39,8 @@ type OptikonEdge struct {
 
 	Next plugin.Handler
 
-	coords   Coords
+	lon      float64
+	lat      float64
 	services []string
 }
 
@@ -67,16 +62,8 @@ func (oe *OptikonEdge) Len() int { return len(oe.proxies) }
 // Name implements plugin.Handler.
 func (oe *OptikonEdge) Name() string { return "optikon-edge" }
 
-// SetLon sets the edge site longitude.
-func (oe *OptikonEdge) SetLon(v float64) { oe.coords[0] = v }
-
-// SetLat sets the edge site latitude.
-func (oe *OptikonEdge) SetLat(v float64) { oe.coords[1] = v }
-
 // ServeDNS implements plugin.Handler.
 func (oe *OptikonEdge) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
-
-	fmt.Println("REQUEST:", r.String())
 
 	state := request.Request{W: w, Req: r}
 	if !oe.match(state) {
@@ -153,8 +140,66 @@ func (oe *OptikonEdge) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 		// fit the udp buffer.
 		ret, _ = state.Scrub(ret)
 
-		fmt.Println("PROXY REPLY MESSAGE:", ret.String())
+		// Assert an additional entry for the table exists.
+		if len(ret.Extra) == 0 {
+			return dns.RcodeServerFailure, errTableParseFailure
+		}
 
+		// Extract the Table from the response.
+		tabRR := ret.Extra[0]
+		tabSubmatches := tableRegex.FindStringSubmatch(tabRR.String())
+		if len(tabSubmatches) < 2 {
+			return dns.RcodeServerFailure, errTableParseFailure
+		}
+		tabStr, err := strconv.Unquote(fmt.Sprintf("\"%s\"", tabSubmatches[1]))
+		if err != nil {
+			return dns.RcodeServerFailure, errTableParseFailure
+		}
+		var tab central.Table
+		if err := json.Unmarshal([]byte(tabStr), &tab); err != nil {
+			return dns.RcodeServerFailure, errTableParseFailure
+		}
+
+		// Remove the Table entry from the return message.
+		ret.Extra = ret.Extra[1:]
+
+		// Parse the target domain out of the request (NOTE: This will always have
+		// a trailing dot.)
+		targetDomain := state.Name()
+
+		// Determine if there is an entry for the DNS name we're looking for.
+		edgeSites, found := tab[targetDomain[:(len(targetDomain)-1)]]
+		if !found || len(edgeSites) == 0 {
+			w.WriteMsg(ret)
+			return dns.RcodeNameError, nil
+		}
+
+		// Compute the distance to the first edge site.
+		closest := edgeSites[0].IP
+		minDist := Distance(oe.lat, oe.lon, edgeSites[0].Lat, edgeSites[0].Lon)
+		for _, edgeSite := range edgeSites {
+			dist := Distance(oe.lat, oe.lon, edgeSite.Lat, edgeSite.Lon)
+			if dist < minDist {
+				minDist = dist
+				closest = edgeSite.IP
+			}
+		}
+
+		// Write the closest cluster IP as a DNS record.
+		var rr dns.RR
+		switch state.Family() {
+		case 1:
+			rr = new(dns.A)
+			rr.(*dns.A).Hdr = dns.RR_Header{Name: state.QName(), Rrtype: dns.TypeA, Class: state.QClass()}
+			rr.(*dns.A).A = net.ParseIP(closest).To4()
+		case 2:
+			rr = new(dns.AAAA)
+			rr.(*dns.AAAA).Hdr = dns.RR_Header{Name: state.QName(), Rrtype: dns.TypeAAAA, Class: state.QClass()}
+			rr.(*dns.AAAA).AAAA = net.ParseIP(closest)
+		}
+		ret.Answer = []dns.RR{rr}
+
+		// Write the response message.
 		w.WriteMsg(ret)
 
 		return 0, nil
@@ -194,9 +239,11 @@ func (oe *OptikonEdge) isAllowedDomain(name string) bool {
 func (oe *OptikonEdge) list() []*Proxy { return oe.p.List(oe.proxies) }
 
 var (
-	errInvalidDomain = errors.New("invalid domain for forward")
-	errNoHealthy     = errors.New("no healthy proxies")
-	errNoOptikonEdge = errors.New("no optikon-edge defined")
+	errInvalidDomain         = errors.New("invalid domain for forward")
+	errNoHealthy             = errors.New("no healthy proxies")
+	errNoOptikonEdge         = errors.New("no optikon-edge defined")
+	errTableParseFailure     = errors.New("unable to parse Table returned from central")
+	errFindingClosestCluster = errors.New("unable to compute closest edge cluster")
 )
 
 // policy tells forward what policy for selecting upstream it uses.
@@ -205,4 +252,8 @@ type policy int
 const (
 	randomPolicy policy = iota
 	roundRobinPolicy
+)
+
+var (
+	tableRegex = regexp.MustCompile("^.*\t0\tIN\tTXT\t\"({.*})\"$")
 )

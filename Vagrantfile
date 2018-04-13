@@ -27,6 +27,8 @@ def provision_vm(config, vm_name, i)
     config.vm.provision "file", source: "provision_files/id_rsa", destination: "/home/vagrant/id_rsa"
     config.vm.provision "file", source: "optikon-dns/kube-dns-svc.yaml", destination: "/home/vagrant/.coredns/kube-dns-svc.yaml"
     config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/kube-dns-svc.yaml"
+    config.vm.provision "file", source: "optikon-dns/kube-dns-depl.yaml", destination: "/home/vagrant/.coredns/kube-dns-depl.yaml"
+    config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/kube-dns-depl.yaml --force"
 end
 
 Vagrant.configure("2") do |config|
