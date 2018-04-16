@@ -24,9 +24,11 @@ def provision_vm(config, vm_name, i)
     config.vm.provision "file", source: "scripts/pv1.yaml", destination: "/home/vagrant/pv1.yaml"
     config.vm.provision "file", source: "scripts/tiller.yaml", destination: "/home/vagrant/tiller.yaml"
     config.vm.provision "shell", path: "scripts/deploy-helm.sh",  privileged: true
-    config.vm.provision "file", source: "provision_files/id_rsa", destination: "/home/vagrant/id_rsa"
+    config.vm.provision "file", source: "scripts/inject-kubeconfig.py", destination: "/home/vagrant/inject-kubeconfig.py"
     if i > 1
-      config.vm.provision "shell", path: "scripts/send-kubeconfig.sh", :args => i-1,  privileged: true
+      ### edge clusters post themselves to optikon API /cluster
+      config.vm.provision "file", source: "scripts/edge-#{i-1}.json", destination: "/home/vagrant/edge-#{i-1}.json" 
+      config.vm.provision "shell", path: "scripts/post-to-optikon.sh", :args => "/home/vagrant/edge-#{i-1}.json"
     end
 end
 
@@ -41,10 +43,11 @@ Vagrant.configure("2") do |config|
             config.vm.define vm_name = "central", primary: true do |config|
             provision_vm(config, vm_name, i)
             config.vm.provision "file", source: "scripts/pv2.yaml", destination: "/home/vagrant/pv2.yaml"
-            config.vm.provision "file", source: "provision_files/id_rsa.pub", destination: "/home/vagrant/id_rsa.pub"
+            config.vm.provision "file", source: "scripts/optikon-api.yaml", destination: "/home/vagrant/optikon-api.yaml"
+            config.vm.provision "file", source: "scripts/optikon-ui.yaml", destination: "/home/vagrant/optikon-ui.yaml"
             if $num_clusters > 1
-              config.vm.provision "shell", path: "scripts/central-keys.sh", env: {"NUM_EDGE" => $num_clusters-1}, privileged: false
               config.vm.provision "shell", path: "scripts/deploy-registry.sh", privileged: true
+              config.vm.provision "shell", path: "scripts/deploy-optikon.sh", privileged: true
             end
           end
         else
@@ -54,5 +57,4 @@ Vagrant.configure("2") do |config|
             end
         end
     end
-
 end

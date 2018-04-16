@@ -1,0 +1,48 @@
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: optikon-api
+  labels:
+    app: optikon-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: optikon-api
+  template:
+    metadata:
+      labels:
+        app: optikon-api
+    spec:
+      containers:
+      - name: optikon-api-pod
+        image: dockerhub.cisco.com/intelligent-edge-dev-docker-local/optikon-api:0.1.1
+        args: ["--scheme", "http", "--host", "0.0.0.0", "--port", "9000", "--central-kube-api", "https://172.16.7.101:8443", "--central-kubeconfig", "/etc/admin.conf"]
+        ports:
+        - containerPort: 9000
+        volumeMounts:
+          - name: demo-config
+            mountPath: /etc/admin.conf
+            subPath: admin.conf
+      volumes:
+      - name: demo-config
+        configMap:
+          name: central-kubeconfig
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: optikon-api
+  name: optikon-api-svc
+  namespace: default
+spec:
+  externalTrafficPolicy: Cluster
+  ports:
+  - nodePort: 30900
+    port: 9000
+    protocol: TCP
+    targetPort: 9000
+  selector:
+    app: optikon-api
+  type: NodePort
