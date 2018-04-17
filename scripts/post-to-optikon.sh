@@ -2,6 +2,8 @@
 
 sudo su
 
+# post my edge cluster w/ embedded Kubeconfig to optikon API /cluster
+
 python /home/vagrant/inject-kubeconfig.py $1
 
 
