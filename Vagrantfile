@@ -28,7 +28,7 @@ def provision_vm(config, vm_name, i)
     if i > 1
       config.vm.provision "file", source: "scripts/edge-#{i-1}.html", destination: "/home/vagrant/html/index.html"
       ### edge clusters post themselves to optikon API /cluster
-      config.vm.provision "file", source: "scripts/edge-#{i-1}.json", destination: "/home/vagrant/edge-#{i-1}.json" 
+      config.vm.provision "file", source: "scripts/edge-#{i-1}.json", destination: "/home/vagrant/edge-#{i-1}.json"
       config.vm.provision "shell", path: "scripts/post-to-optikon.sh", :args => "/home/vagrant/edge-#{i-1}.json"
     end
 end
@@ -47,6 +47,7 @@ Vagrant.configure("2") do |config|
             config.vm.provision "file", source: "scripts/central.html", destination: "/home/vagrant/html/index.html"
             config.vm.provision "file", source: "scripts/optikon-api.yaml", destination: "/home/vagrant/optikon-api.yaml"
             config.vm.provision "file", source: "scripts/optikon-ui.yaml", destination: "/home/vagrant/optikon-ui.yaml"
+            config.vm.provision "shell", path: "scripts/hosts.sh", privileged: true
             if $num_clusters > 1
               config.vm.provision "shell", path: "scripts/deploy-registry.sh", privileged: true
               config.vm.provision "shell", path: "scripts/deploy-optikon.sh", privileged: true
