@@ -47,6 +47,7 @@ Vagrant.configure("2") do |config|
             config.vm.provision "file", source: "scripts/pv.yaml", destination: "/home/vagrant/pv.yaml"
             config.vm.provision "file", source: "scripts/pv1.yaml", destination: "/home/vagrant/pv1.yaml"
 
+            config.vm.provision "shell", path: "scripts/hosts.sh", privileged: true
             config.vm.provision "shell", path: "scripts/deploy-registry.sh", privileged: true
             config.vm.provision "shell", path: "scripts/deploy-optikon.sh", privileged: true
           end
