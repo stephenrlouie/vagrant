@@ -23,12 +23,6 @@ def provision_vm(config, vm_name, i)
     config.vm.provision "shell", path: "scripts/reset-kubeconfig.sh", env: {"MYIP" => ip}, privileged: true
     config.vm.provision "file", source: "scripts/tiller.yaml", destination: "/home/vagrant/tiller.yaml"
     config.vm.provision "shell", path: "scripts/deploy-helm.sh",  privileged: true
-    if i > 1 #edge clusters only
-      config.vm.provision "file", source: "scripts/edge-#{i-1}.html", destination: "/home/vagrant/html/index.html"
-      config.vm.provision "file", source: "scripts/inject-kubeconfig.py", destination: "/home/vagrant/inject-kubeconfig.py"
-      config.vm.provision "file", source: "scripts/edge-#{i-1}.json", destination: "/home/vagrant/edge-#{i-1}.json"
-      config.vm.provision "shell", path: "scripts/post-to-optikon.sh", :args => "/home/vagrant/edge-#{i-1}.json"
-    end
 end
 
 Vagrant.configure("2") do |config|
@@ -45,7 +39,6 @@ Vagrant.configure("2") do |config|
             config.vm.provision "file", source: "scripts/optikon-api.yaml", destination: "/home/vagrant/optikon-api.yaml"
             config.vm.provision "file", source: "scripts/optikon-ui.yaml", destination: "/home/vagrant/optikon-ui.yaml"
             config.vm.provision "file", source: "scripts/pv.yaml", destination: "/home/vagrant/pv.yaml"
-            config.vm.provision "file", source: "scripts/pv1.yaml", destination: "/home/vagrant/pv1.yaml"
 
             config.vm.provision "shell", path: "scripts/hosts.sh", privileged: true
             config.vm.provision "shell", path: "scripts/deploy-registry.sh", privileged: true
@@ -55,6 +48,10 @@ Vagrant.configure("2") do |config|
           # EDGE VM CLUSTERS
             config.vm.define vm_name = "%s-%01d" % ["edge", i-1] do |config|
                 provision_vm(config, vm_name, i)
+                config.vm.provision "file", source: "scripts/edge-#{i-1}.html", destination: "/home/vagrant/html/index.html"
+                config.vm.provision "file", source: "scripts/inject-kubeconfig.py", destination: "/home/vagrant/inject-kubeconfig.py"
+                config.vm.provision "file", source: "scripts/edge-#{i-1}.json", destination: "/home/vagrant/edge-#{i-1}.json"
+                config.vm.provision "shell", path: "scripts/post-to-optikon.sh", :args => "/home/vagrant/edge-#{i-1}.json"
             end
         end
     end

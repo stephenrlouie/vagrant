@@ -4,7 +4,6 @@
 sudo su
 
 # create a persistent volume
-kubectl create -f /home/vagrant/pv1.yaml
 kubectl create -f /home/vagrant/tiller.yaml
 kubectl create clusterrolebinding add-on-cluster-admin --clusterrole=cluster-admin --serviceaccount=kube-system:default
 
