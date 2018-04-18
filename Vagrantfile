@@ -12,6 +12,9 @@ $box_version = ENV["VM_VERSION"] || "1.2.0"
 $central_cluster_coords = (ENV["CENTRAL_CLUSTER_COORDS"] || "55.692770,12.598624").split(/\s*,\s*/)
 $edge_cluster_coords = (ENV["EDGE_CLUSTER_COORDS"] || "55.680770,12.543006,55.664023,12.610126").split(/\s*,\s*/)
 
+$svc_read_interval_secs = 2
+$svc_push_interval_secs = 4
+
 def provision_vm(config, vm_name, i)
     config.vm.hostname = vm_name
     config.vm.synced_folder ".", "/vagrant", disabled: true
@@ -58,7 +61,13 @@ Vagrant.configure("2") do |config|
                 config.vm.provision "file", source: "optikon-dns/plugin/edge/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell,
                     path: "scripts/replace-env-vars.sh",
-                    env: {"CENTRAL_IP" => "172.16.7.101", "LON" => $edge_cluster_coords[2*(i-2)], "LAT" => $edge_cluster_coords[2*(i-2)+1]}
+                    env: {
+                        "CENTRAL_IP" => "172.16.7.101",
+                        "LON" => $edge_cluster_coords[2*(i-2)],
+                        "LAT" => $edge_cluster_coords[2*(i-2)+1],
+                        "SVC_READ_INTERVAL" => $svc_read_interval_secs,
+                        "SVC_PUSH_INTERVAL" => $svc_push_interval_secs
+                    }
                 config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
                 if i == 2 # Deploy echoserver on first edge cluster.
