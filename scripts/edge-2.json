@@ -3,7 +3,8 @@
 		"name": "copenhagen-2",
 		"labels": {
 			"Region": "Europe",
-			"Category": "B" 
+			"Category": "B",
+			"Kubecon": "True" 
 		},
 		"annotations": {
 			"Lat": "55.664023",
