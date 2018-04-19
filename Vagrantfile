@@ -10,7 +10,7 @@ $box = ENV["VM_NAME"] || "intelligent-edge-admin/centos-k8s-1.10.0"
 $box_version = ENV["VM_VERSION"] || "1.2.0"
 
 $central_cluster_coords = (ENV["CENTRAL_CLUSTER_COORDS"] || "55.692770,12.598624").split(/\s*,\s*/)
-$edge_cluster_coords = (ENV["EDGE_CLUSTER_COORDS"] || "55.680770,12.543006,55.664023,12.610126,55.6748923,12.5534").split(/\s*,\s*/)
+$edge_cluster_coords = (ENV["EDGE_CLUSTER_COORDS"] || "55.664023,12.610126,55.680770,12.543006,55.6748923,12.5534").split(/\s*,\s*/)
 
 def provision_vm(config, vm_name, i)
     config.vm.hostname = vm_name
@@ -50,13 +50,13 @@ Vagrant.configure("2") do |config|
                 config.vm.provision "file", source: "scripts/optikon-ui.yaml", destination: "/home/vagrant/optikon-ui.yaml"
                 config.vm.provision "file", source: "scripts/pv.yaml", destination: "/home/vagrant/pv.yaml"
 
-                config.vm.provision "shell", path: "scripts/resolve.sh", privileged: true
                 config.vm.provision "shell", path: "scripts/deploy-registry.sh", privileged: true
                 config.vm.provision "shell", path: "scripts/deploy-optikon.sh", privileged: true
 
                 config.vm.provision "file", source: "optikon-dns/plugin/central/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
+                config.vm.provision "shell", path: "scripts/resolve.sh", privileged: true
             end
         else
           # EDGE VM CLUSTERS

@@ -2,7 +2,8 @@
 	"metadata": {
 		"name": "copenhagen-3",
 		"labels": {
-			"Region": "Europe"
+			"Region": "Europe",
+			"ID": "789"
 		},
 		"annotations": {
 			"Lat": "55.6748923",
