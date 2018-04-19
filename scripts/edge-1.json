@@ -3,11 +3,12 @@
 		"name": "copenhagen-1",
 		"labels": {
 			"Region": "Europe",
-			"Kubecon": "True"
+			"Kubecon": "True",
+			"ID": "123"
 		},
 		"annotations": {
-			"Lat": "55.680770",
-			"Long": "12.543006",
+			"Lat": "55.664023",
+			"Long": "12.610126",
 			"Tiller": "172.16.7.102:30134",
 			"APIServer": "https://172.16.7.102:8443",
 			"Conf": ""
