@@ -1,0 +1,15 @@
+{
+	"metadata": {
+		"name": "copenhagen-3",
+		"labels": {
+			"Region": "Europe"
+		},
+		"annotations": {
+			"Lat": "55.6748923",
+			"Long": "12.5534",
+			"Tiller": "172.16.7.104:30134",
+			"APIServer": "https://172.16.7.104:8443",
+			"Conf": ""
+		}
+	}
+}
