@@ -50,13 +50,13 @@ Vagrant.configure("2") do |config|
                 config.vm.provision "file", source: "scripts/optikon-ui.yaml", destination: "/home/vagrant/optikon-ui.yaml"
                 config.vm.provision "file", source: "scripts/pv.yaml", destination: "/home/vagrant/pv.yaml"
 
-                config.vm.provision "shell", path: "scripts/resolve.sh", privileged: true
                 config.vm.provision "shell", path: "scripts/deploy-registry.sh", privileged: true
                 config.vm.provision "shell", path: "scripts/deploy-optikon.sh", privileged: true
 
                 config.vm.provision "file", source: "optikon-dns/plugin/central/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
+                config.vm.provision "shell", path: "scripts/resolve.sh", privileged: true
             end
         else
           # EDGE VM CLUSTERS
