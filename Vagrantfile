@@ -27,6 +27,12 @@ end
 
 Vagrant.configure("2") do |config|
 
+    # Increase memory for Virtualbox
+    config.vm.provider "virtualbox" do |vb|
+          vb.memory = "4000"
+          vb.cpus = 2
+    end
+
     if $edge_cluster_coords.length != (2 * ($num_clusters-1))
         raise Vagrant::Errors::VagrantError.new, "Incorrect number of edge cluster coordinates."
     end
