@@ -26,9 +26,9 @@ def provision_vm(config, vm_name, i)
     config.vm.provision "shell", path: "scripts/reset-kube-config.sh", env: {"MYIP" => ip}, privileged: true
     config.vm.provision "file", source: "scripts/tiller.yaml", destination: "/home/vagrant/tiller.yaml"
     config.vm.provision "shell", path: "scripts/deploy-helm.sh",  privileged: true
-    config.vm.provision "file", source: "optikon-dns/kube-dns-svc.yaml", destination: "/home/vagrant/.coredns/kube-dns-svc.yaml"
+    config.vm.provision "file", source: "optikon-dns/manifests/kube-dns-svc.yaml", destination: "/home/vagrant/.coredns/kube-dns-svc.yaml"
     config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/kube-dns-svc.yaml"
-    config.vm.provision "file", source: "optikon-dns/kube-dns-depl.yaml", destination: "/home/vagrant/.coredns/kube-dns-depl.yaml"
+    config.vm.provision "file", source: "optikon-dns/manifests/kube-dns-depl.yaml", destination: "/home/vagrant/.coredns/kube-dns-depl.yaml"
     config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/kube-dns-depl.yaml --force"
 end
 
