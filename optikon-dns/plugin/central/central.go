@@ -2,15 +2,16 @@ package central
 
 import (
 	"encoding/json"
+	"net/http"
+	"time"
 
 	"github.com/coredns/coredns/plugin"
+	"github.com/coredns/coredns/plugin/pkg/up"
 	"github.com/coredns/coredns/request"
 	"github.com/miekg/dns"
 	"golang.org/x/net/context"
+	"k8s.io/client-go/kubernetes"
 )
-
-// Table specifies the mapping from service DNS names to edge sites.
-type Table map[string][]EdgeSite
 
 // EdgeSite is a wrapper around all information needed about edge sites serving
 // content.
@@ -23,50 +24,24 @@ type EdgeSite struct {
 // OptikonCentral is a plugin that returns your IP address, port and the
 // protocol used for connecting to CoreDNS.
 type OptikonCentral struct {
-	table Table
-	Next  plugin.Handler
+	table           *ConcurrentTable
+	Next            plugin.Handler
+	clientset       *kubernetes.Clientset
+	ip              string
+	lon             float64
+	lat             float64
+	svcReadInterval time.Duration
+	svcReadProbe    *up.Probe
+	server          *http.Server
 }
 
 // New returns a new OptikonCentral.
 func New() *OptikonCentral {
 	oc := &OptikonCentral{
-		table: make(Table),
+		table:        NewConcurrentTable(),
+		svcReadProbe: up.New(),
 	}
 	return oc
-}
-
-func (oc *OptikonCentral) populateTable() {
-
-	oc.table["kubernetes.default.svc.cluster.external"] = []EdgeSite{
-		EdgeSite{
-			IP:  "172.16.7.102",
-			Lon: 55.664023,
-			Lat: 12.610126,
-		},
-		EdgeSite{
-			IP:  "172.16.7.103",
-			Lon: 55.680770,
-			Lat: 12.543006,
-		},
-		EdgeSite{
-			IP:  "172.16.7.104",
-			Lon: 55.6748923,
-			Lat: 12.5534,
-		},
-	}
-
-	oc.table["nginx-kubecon.default.svc.cluster.external"] = []EdgeSite{
-		EdgeSite{
-			IP:  "172.16.7.102",
-			Lon: 55.664023,
-			Lat: 12.610126,
-		},
-		EdgeSite{
-			IP:  "172.16.7.103",
-			Lon: 55.680770,
-			Lat: 12.543006,
-		},
-	}
 }
 
 // ServeDNS implements the plugin.Handler interface.
@@ -80,7 +55,7 @@ func (oc *OptikonCentral) ServeDNS(ctx context.Context, w dns.ResponseWriter, r 
 	targetDomain := state.Name()
 
 	// Determine if there is an entry for the DNS name we're looking for.
-	edgeSites, found := oc.table[targetDomain[:(len(targetDomain)-1)]]
+	edgeSites, found := oc.table.Lookup(targetDomain[:(len(targetDomain) - 1)])
 	if !found || len(edgeSites) == 0 {
 		return plugin.NextOrFailure(oc.Name(), oc.Next, ctx, w, r)
 	}

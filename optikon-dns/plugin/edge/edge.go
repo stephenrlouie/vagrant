@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/coredns/coredns/plugin"
+	"github.com/coredns/coredns/plugin/pkg/up"
 	"github.com/coredns/coredns/request"
+	"k8s.io/client-go/kubernetes"
 	"wwwin-github.cisco.com/edge/optikon-dns/plugin/central"
 
 	"github.com/miekg/dns"
@@ -37,23 +39,39 @@ type OptikonEdge struct {
 
 	forceTCP bool // also here for testing
 
-	Next plugin.Handler
+	Next      plugin.Handler
+	clientset *kubernetes.Clientset
 
-	lon      float64
-	lat      float64
-	services []string
+	ip  string
+	lon float64
+	lat float64
+
+	services *ConcurrentStringSlice
+
+	svcReadProbe    *up.Probe
+	svcReadInterval time.Duration
+	svcPushInterval time.Duration
 }
 
 // New returns a new OptikonEdge.
 func New() *OptikonEdge {
-	oe := &OptikonEdge{maxfails: 2, tlsConfig: new(tls.Config), expire: defaultExpire, p: new(random), from: ".", hcInterval: hcDuration}
+	oe := &OptikonEdge{
+		maxfails:     2,
+		tlsConfig:    new(tls.Config),
+		expire:       defaultExpire,
+		p:            new(random),
+		from:         ".",
+		hcInterval:   hcDuration,
+		services:     NewConcurrentStringSlice(),
+		svcReadProbe: up.New(),
+	}
 	return oe
 }
 
 // SetProxy appends p to the proxy list and starts healthchecking.
 func (oe *OptikonEdge) SetProxy(p *Proxy) {
 	oe.proxies = append(oe.proxies, p)
-	p.start(oe.hcInterval)
+	p.start(oe.hcInterval, oe.svcPushInterval)
 }
 
 // Len returns the number of configured proxies.
@@ -85,8 +103,6 @@ func (oe *OptikonEdge) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 			// select an upstream to connect to.
 			r := new(random)
 			proxy = r.List(oe.proxies)[0]
-
-			HealthcheckBrokenCount.Add(1)
 		}
 
 		if span != nil {
@@ -143,7 +159,6 @@ func (oe *OptikonEdge) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 		// Assert an additional entry for the table exists.
 		if len(ret.Extra) == 0 {
 			if len(ret.Answer) == 0 {
-				fmt.Println("ERROR: No Additional entries returned!")
 				return dns.RcodeServerFailure, errTableParseFailure
 			}
 			w.WriteMsg(ret)
@@ -154,18 +169,14 @@ func (oe *OptikonEdge) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 		edgeSiteRR := ret.Extra[0]
 		edgeSiteSubmatches := edgeSiteRegex.FindStringSubmatch(edgeSiteRR.String())
 		if len(edgeSiteSubmatches) < 2 {
-			fmt.Println("EDGESITERR:", edgeSiteRR)
-			fmt.Println("EDGESITESUBMATCHES:", edgeSiteSubmatches)
 			return dns.RcodeServerFailure, errTableParseFailure
 		}
 		edgeSiteStr, err := strconv.Unquote(fmt.Sprintf("\"%s\"", edgeSiteSubmatches[1]))
 		if err != nil {
-			fmt.Println("EDGESITESTR:", edgeSiteStr)
 			return dns.RcodeServerFailure, errTableParseFailure
 		}
 		var edgeSites []central.EdgeSite
 		if err := json.Unmarshal([]byte(edgeSiteStr), &edgeSites); err != nil {
-			fmt.Println("EDGESITESTR:", edgeSiteStr)
 			return dns.RcodeServerFailure, errTableParseFailure
 		}
 

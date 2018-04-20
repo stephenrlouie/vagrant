@@ -8,9 +8,9 @@ import (
 
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin"
-	"github.com/coredns/coredns/plugin/metrics"
 	"github.com/coredns/coredns/plugin/pkg/dnsutil"
 	pkgtls "github.com/coredns/coredns/plugin/pkg/tls"
+	"wwwin-github.cisco.com/edge/optikon-dns/plugin/central"
 
 	"github.com/mholt/caddy"
 )
@@ -37,15 +37,15 @@ func setup(c *caddy.Controller) error {
 
 	// Add the plugin handler to the dnsserver.
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
+		oe.clientset, err = central.RegisterKubernetesClient()
 		oe.Next = next
 		return oe
 	})
+	if err != nil {
+		return err
+	}
 
-	// Register Prometheus metrics.
 	c.OnStartup(func() error {
-		once.Do(func() {
-			metrics.MustRegister(c, RequestCount, RcodeCount, RequestDuration, HealthcheckFailureCount, SocketGauge)
-		})
 		return oe.OnStartup()
 	})
 
@@ -58,14 +58,22 @@ func setup(c *caddy.Controller) error {
 
 // OnStartup starts a goroutines for all proxies.
 func (oe *OptikonEdge) OnStartup() (err error) {
+	oe.startReadingServices()
+	meta := central.EdgeSite{
+		IP:  oe.ip,
+		Lon: oe.lon,
+		Lat: oe.lat,
+	}
 	for _, p := range oe.proxies {
-		p.start(oe.hcInterval)
+		p.start(oe.hcInterval, oe.svcPushInterval)
+		p.startPushingServices(meta, oe.services)
 	}
 	return nil
 }
 
 // OnShutdown stops all configured proxies.
 func (oe *OptikonEdge) OnShutdown() error {
+	oe.stopReadingServices()
 	for _, p := range oe.proxies {
 		p.close()
 	}
@@ -90,6 +98,11 @@ func parseOptikonEdge(c *caddy.Controller) (*OptikonEdge, error) {
 		}
 		i++
 
+		// Parse my IP address.
+		if !c.Args(&oe.ip) {
+			return oe, c.ArgErr()
+		}
+
 		// Parse the edge cluster's longitude value.
 		var lon string
 		if !c.Args(&lon) {
@@ -111,6 +124,28 @@ func parseOptikonEdge(c *caddy.Controller) (*OptikonEdge, error) {
 			return oe, err
 		}
 		oe.lat = parsedLat
+
+		// Parse the service read interval.
+		var svcReadIntervalSecsString string
+		if !c.Args(&svcReadIntervalSecsString) {
+			return oe, c.ArgErr()
+		}
+		svcReadIntervalSecs, err := strconv.Atoi(svcReadIntervalSecsString)
+		if err != nil {
+			return oe, err
+		}
+		oe.svcReadInterval = time.Duration(svcReadIntervalSecs) * time.Second
+
+		// Parse the service push interval.
+		var svcPushIntervalSecsString string
+		if !c.Args(&svcPushIntervalSecsString) {
+			return oe, c.ArgErr()
+		}
+		svcPushIntervalSecs, err := strconv.Atoi(svcPushIntervalSecsString)
+		if err != nil {
+			return oe, err
+		}
+		oe.svcPushInterval = time.Duration(svcPushIntervalSecs) * time.Second
 
 		if !c.Args(&oe.from) {
 			return oe, c.ArgErr()

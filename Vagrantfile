@@ -57,6 +57,14 @@ Vagrant.configure("2") do |config|
                 config.vm.provision "shell", path: "scripts/deploy-optikon.sh", privileged: true
 
                 config.vm.provision "file", source: "optikon-dns/plugin/central/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
+                config.vm.provision :shell,
+                    path: "scripts/replace-env-vars.sh",
+                    env: {
+                        "MY_IP" => "172.16.7.#{i+100}",
+                        "LON" => $central_cluster_coords[0],
+                        "LAT" => $central_cluster_coords[1],
+                        "SVC_READ_INTERVAL" => $svc_read_interval
+                    }
                 config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
                 config.vm.provision "shell", path: "scripts/resolve.sh", privileged: true
@@ -73,6 +81,7 @@ Vagrant.configure("2") do |config|
                 config.vm.provision :shell,
                     path: "scripts/replace-env-vars.sh",
                     env: {
+                        "MY_IP" => "172.16.7.#{i+100}",
                         "CENTRAL_IP" => "172.16.7.101",
                         "LON" => $edge_cluster_coords[2*(i-2)],
                         "LAT" => $edge_cluster_coords[2*(i-2)+1],
