@@ -21,11 +21,6 @@ spec:
     protocol: TCP
     targetPort: 53
     nodePort: 30053
-  - name: daemon
-    protocol: TCP
-    port: 9090
-    targetPort: 9090
-    nodePort: 30090
   selector:
     k8s-app: kube-dns
   sessionAffinity: None

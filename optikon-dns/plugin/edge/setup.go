@@ -1,4 +1,22 @@
-// NOTE: This file adopted from the existing `forward` plugin for CoreDNS.
+/*
+ * Copyright 2018 The CoreDNS Authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may
+ * not use this file except in compliance with the License. You may obtain
+ * a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * NOTE: This software contains code derived from the the Apache-licensed CoreDNS
+ * `forward` plugin (https://github.com/coredns/coredns/tree/master/plugin/forward),
+ * including various modifications by Cisco Systems, Inc.
+ */
 
 package edge
 
@@ -10,9 +28,9 @@ import (
 
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin"
+	"github.com/coredns/coredns/plugin/metrics"
 	"github.com/coredns/coredns/plugin/pkg/dnsutil"
 	pkgtls "github.com/coredns/coredns/plugin/pkg/tls"
-	"wwwin-github.cisco.com/edge/optikon-dns/plugin/central"
 
 	"github.com/mholt/caddy"
 )
@@ -36,19 +54,18 @@ func setup(c *caddy.Controller) error {
 	if oe.Len() > max {
 		return plugin.Error("optikon-edge", fmt.Errorf("more than %d TOs configured: %d", max, oe.Len()))
 	}
-	fmt.Printf("Parsed OptikonEdge with Parameters: IP=%s, Lon=%f, Lat=%f, svcReadInterval=%v, svcPushInterval=%v\n", oe.ip, oe.lon, oe.lat, oe.svcReadInterval, oe.svcPushInterval)
 
 	// Add the plugin handler to the dnsserver.
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
-		oe.clientset, err = central.RegisterKubernetesClient()
 		oe.Next = next
 		return oe
 	})
-	if err != nil {
-		return err
-	}
 
+	// Register Prometheus metrics.
 	c.OnStartup(func() error {
+		once.Do(func() {
+			metrics.MustRegister(c, RequestCount, RcodeCount, RequestDuration, HealthcheckFailureCount, SocketGauge)
+		})
 		return oe.OnStartup()
 	})
 
@@ -61,22 +78,14 @@ func setup(c *caddy.Controller) error {
 
 // OnStartup starts a goroutines for all proxies.
 func (oe *OptikonEdge) OnStartup() (err error) {
-	oe.startReadingServices()
-	meta := central.EdgeSite{
-		IP:  oe.ip,
-		Lon: oe.lon,
-		Lat: oe.lat,
-	}
 	for _, p := range oe.proxies {
 		p.start(oe.hcInterval)
-		p.startPushingServices(oe.svcPushInterval, meta, oe.services)
 	}
 	return nil
 }
 
 // OnShutdown stops all configured proxies.
 func (oe *OptikonEdge) OnShutdown() error {
-	oe.stopReadingServices()
 	for _, p := range oe.proxies {
 		p.close()
 	}
@@ -101,11 +110,6 @@ func parseOptikonEdge(c *caddy.Controller) (*OptikonEdge, error) {
 		}
 		i++
 
-		// Parse my IP address.
-		if !c.Args(&oe.ip) {
-			return oe, c.ArgErr()
-		}
-
 		// Parse the edge cluster's longitude value.
 		var lon string
 		if !c.Args(&lon) {
@@ -127,28 +131,6 @@ func parseOptikonEdge(c *caddy.Controller) (*OptikonEdge, error) {
 			return oe, err
 		}
 		oe.lat = parsedLat
-
-		// Parse the service read interval.
-		var svcReadIntervalSecsString string
-		if !c.Args(&svcReadIntervalSecsString) {
-			return oe, c.ArgErr()
-		}
-		svcReadIntervalSecs, err := strconv.Atoi(svcReadIntervalSecsString)
-		if err != nil {
-			return oe, err
-		}
-		oe.svcReadInterval = time.Duration(svcReadIntervalSecs) * time.Second
-
-		// Parse the service push interval.
-		var svcPushIntervalSecsString string
-		if !c.Args(&svcPushIntervalSecsString) {
-			return oe, c.ArgErr()
-		}
-		svcPushIntervalSecs, err := strconv.Atoi(svcPushIntervalSecsString)
-		if err != nil {
-			return oe, err
-		}
-		oe.svcPushInterval = time.Duration(svcPushIntervalSecs) * time.Second
 
 		if !c.Args(&oe.from) {
 			return oe, c.ArgErr()

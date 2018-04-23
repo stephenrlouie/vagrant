@@ -1,18 +1,27 @@
-// NOTE: This file adopted from the existing `forward` plugin for CoreDNS.
+/*
+ * Copyright 2018 The CoreDNS Authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may
+ * not use this file except in compliance with the License. You may obtain
+ * a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package edge
 
 import (
-	"bytes"
 	"crypto/tls"
-	"fmt"
-	"net/http"
-	"regexp"
 	"sync/atomic"
 	"time"
 
 	"github.com/coredns/coredns/plugin/pkg/up"
-	"wwwin-github.cisco.com/edge/optikon-dns/plugin/central"
 
 	"github.com/miekg/dns"
 )
@@ -29,25 +38,15 @@ type Proxy struct {
 	// health checking
 	probe *up.Probe
 	fails uint32
-
-	// Daemon connection.
-	pushAddr    string
-	pushStopper chan struct{}
 }
 
 // NewProxy returns a new proxy.
 func NewProxy(addr string, tlsConfig *tls.Config) *Proxy {
-	var pAddr string
-	ipRegexSubmatches := ipRegex.FindStringSubmatch(addr)
-	if len(ipRegexSubmatches) >= 2 {
-		pAddr = "http://" + ipRegexSubmatches[1] + ":9090"
-	}
 	p := &Proxy{
 		addr:      addr,
 		fails:     0,
 		probe:     up.New(),
 		transport: newTransport(addr, tlsConfig),
-		pushAddr:  pAddr,
 	}
 	p.client = dnsClient(tlsConfig)
 	return p
@@ -80,7 +79,7 @@ func (p *Proxy) Dial(proto string) (*dns.Conn, error) { return p.transport.Dial(
 // Yield returns the connection to the pool.
 func (p *Proxy) Yield(c *dns.Conn) { p.transport.Yield(c) }
 
-// Healthcheck kicks off a round of health checks for this proxy.
+// Healthcheck kicks of a round of health checks for this proxy.
 func (p *Proxy) Healthcheck() { p.probe.Do(p.Check) }
 
 // Down returns true if this proxy is down, i.e. has *more* fails than maxfails.
@@ -95,65 +94,15 @@ func (p *Proxy) Down(maxfails uint32) bool {
 
 // close stops the health checking goroutine.
 func (p *Proxy) close() {
-	close(p.pushStopper)
 	p.probe.Stop()
 	p.transport.Stop()
 }
 
 // start starts the proxy's healthchecking.
-func (p *Proxy) start(healthCheckDuration time.Duration) {
-	p.probe.Start(healthCheckDuration)
-}
-
-// Starts the process of pushing the list of services to central proxies.
-func (p *Proxy) startPushingServices(servicePushDuration time.Duration, meta central.EdgeSite, update *ConcurrentStringSet) {
-	ticker := time.NewTicker(servicePushDuration)
-	p.pushStopper = make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				if update.Size() == 0 {
-					fmt.Println("INFO no running services to push to central")
-					continue
-				}
-				jsn, err := update.ToJSON(meta)
-				if err != nil {
-					fmt.Println("ERROR while marshalling JSON:", err)
-					continue
-				}
-				req, err := http.NewRequest("POST", p.pushAddr, bytes.NewBuffer(jsn))
-				if err != nil {
-					fmt.Println("ERROR while formulating request to central:", err)
-					continue
-				}
-				req.Header.Set("Content-Type", "application/json")
-				client := &http.Client{}
-				resp, err := client.Do(req)
-				if err != nil {
-					fmt.Println("ERROR while POSTing request to central:", err)
-					continue
-				}
-				if resp.StatusCode != 200 {
-					resp.Body.Close()
-					fmt.Println("ERROR: Received non-200 response from central:", resp.StatusCode)
-					continue
-				}
-				resp.Body.Close()
-			case <-p.pushStopper:
-				ticker.Stop()
-				return
-			}
-		}
-	}()
-}
+func (p *Proxy) start(duration time.Duration) { p.probe.Start(duration) }
 
 const (
 	dialTimeout = 4 * time.Second
 	timeout     = 2 * time.Second
 	hcDuration  = 500 * time.Millisecond
-)
-
-var (
-	ipRegex = regexp.MustCompile(`^(.*):\d+$`)
 )

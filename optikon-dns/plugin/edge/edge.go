@@ -1,3 +1,23 @@
+/*
+ * Copyright 2018 The CoreDNS Authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may
+ * not use this file except in compliance with the License. You may obtain
+ * a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * NOTE: This software contains code derived from the the Apache-licensed CoreDNS
+ * `forward` plugin (https://github.com/coredns/coredns/tree/master/plugin/forward),
+ * including various modifications by Cisco Systems, Inc.
+ */
+
 package edge
 
 import (
@@ -13,7 +33,6 @@ import (
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/request"
-	"k8s.io/client-go/kubernetes"
 	"wwwin-github.cisco.com/edge/optikon-dns/plugin/central"
 
 	"github.com/miekg/dns"
@@ -38,31 +57,16 @@ type OptikonEdge struct {
 
 	forceTCP bool // also here for testing
 
-	Next      plugin.Handler
-	clientset *kubernetes.Clientset
+	Next plugin.Handler
 
-	ip  string
-	lon float64
-	lat float64
-
-	services *ConcurrentStringSet
-
-	svcReadStopper  chan struct{}
-	svcReadInterval time.Duration
-	svcPushInterval time.Duration
+	lon      float64
+	lat      float64
+	services []string
 }
 
 // New returns a new OptikonEdge.
 func New() *OptikonEdge {
-	oe := &OptikonEdge{
-		maxfails:   2,
-		tlsConfig:  new(tls.Config),
-		expire:     defaultExpire,
-		p:          new(random),
-		from:       ".",
-		hcInterval: hcDuration,
-		services:   NewConcurrentStringSet(),
-	}
+	oe := &OptikonEdge{maxfails: 2, tlsConfig: new(tls.Config), expire: defaultExpire, p: new(random), from: ".", hcInterval: hcDuration}
 	return oe
 }
 
@@ -86,31 +90,6 @@ func (oe *OptikonEdge) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 		return plugin.NextOrFailure(oe.Name(), oe.Next, ctx, w, r)
 	}
 
-	// Parse the target domain out of the request (NOTE: This will always have
-	// a trailing dot.)
-	targetDomain := state.Name()
-
-	// If we're already running the service, return my IP.
-	if oe.services.Contains(targetDomain[:(len(targetDomain) - 1)]) {
-		ret := new(dns.Msg)
-		ret.SetReply(r)
-		ret.Authoritative, ret.RecursionAvailable, ret.Compress = true, true, true
-		var rr dns.RR
-		switch state.Family() {
-		case 1:
-			rr = new(dns.A)
-			rr.(*dns.A).Hdr = dns.RR_Header{Name: state.QName(), Rrtype: dns.TypeA, Class: state.QClass()}
-			rr.(*dns.A).A = net.ParseIP(oe.ip).To4()
-		case 2:
-			rr = new(dns.AAAA)
-			rr.(*dns.AAAA).Hdr = dns.RR_Header{Name: state.QName(), Rrtype: dns.TypeAAAA, Class: state.QClass()}
-			rr.(*dns.AAAA).AAAA = net.ParseIP(oe.ip)
-		}
-		ret.Answer = []dns.RR{rr}
-		w.WriteMsg(ret)
-		return 0, nil
-	}
-
 	fails := 0
 	var span, child ot.Span
 	var upstreamErr error
@@ -126,6 +105,8 @@ func (oe *OptikonEdge) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 			// select an upstream to connect to.
 			r := new(random)
 			proxy = r.List(oe.proxies)[0]
+
+			HealthcheckBrokenCount.Add(1)
 		}
 
 		if span != nil {
@@ -182,6 +163,7 @@ func (oe *OptikonEdge) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 		// Assert an additional entry for the table exists.
 		if len(ret.Extra) == 0 {
 			if len(ret.Answer) == 0 {
+				fmt.Println("ERROR: No Additional entries returned!")
 				return dns.RcodeServerFailure, errTableParseFailure
 			}
 			w.WriteMsg(ret)
@@ -192,14 +174,18 @@ func (oe *OptikonEdge) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 		edgeSiteRR := ret.Extra[0]
 		edgeSiteSubmatches := edgeSiteRegex.FindStringSubmatch(edgeSiteRR.String())
 		if len(edgeSiteSubmatches) < 2 {
+			fmt.Println("EDGESITERR:", edgeSiteRR)
+			fmt.Println("EDGESITESUBMATCHES:", edgeSiteSubmatches)
 			return dns.RcodeServerFailure, errTableParseFailure
 		}
 		edgeSiteStr, err := strconv.Unquote(fmt.Sprintf("\"%s\"", edgeSiteSubmatches[1]))
 		if err != nil {
+			fmt.Println("EDGESITESTR:", edgeSiteStr)
 			return dns.RcodeServerFailure, errTableParseFailure
 		}
 		var edgeSites []central.EdgeSite
 		if err := json.Unmarshal([]byte(edgeSiteStr), &edgeSites); err != nil {
+			fmt.Println("EDGESITESTR:", edgeSiteStr)
 			return dns.RcodeServerFailure, errTableParseFailure
 		}
 

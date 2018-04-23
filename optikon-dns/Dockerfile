@@ -1,11 +1,9 @@
 # Start with a Golang-enabled base image.
 FROM golang:1.10.0 as builder
 
-# Fetch all dependencies.
+# Fetch the CoreDNS repo.
 RUN go get github.com/coredns/coredns
 RUN go get github.com/opentracing/opentracing-go
-RUN go get k8s.io/client-go/...
-RUN rm -rf /go/src/github.com/coredns/coredns/vendor/github.com/golang/glog
 
 # Mount the central and edge plugins.
 COPY plugin/central /go/src/wwwin-github.cisco.com/edge/optikon-dns/plugin/central
@@ -30,9 +28,6 @@ COPY --from=builder /go/src/github.com/coredns/coredns/coredns /coredns
 
 # Expose DNS ports.
 EXPOSE 53 53/udp
-
-# Expose the daemon process port.
-EXPOSE 9090
 
 # Mount the executable for entry.
 ENTRYPOINT ["/coredns"]
