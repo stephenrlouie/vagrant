@@ -72,7 +72,7 @@ Vagrant.configure("2") do |config|
                     env: {
                         "CENTRAL_IP" => "172.16.7.101",
                         "LON" => $edge_cluster_coords[2*(i-2)],
-                        "LAT" => $edge_cluster_coords[2*(i-2)+1],
+                        "LAT" => $edge_cluster_coords[2*(i-2)+1]
                     }
                 config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
