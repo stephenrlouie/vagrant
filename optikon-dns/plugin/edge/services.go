@@ -1,6 +1,7 @@
 package edge
 
 import (
+	"fmt"
 	"time"
 
 	"k8s.io/api/core/v1"
@@ -8,23 +9,25 @@ import (
 )
 
 // Starts the process of reading Kubernetes services every read interval.
-func (oe *OptikonEdge) startReadingServices() {
-	ticker := time.NewTicker(oe.svcReadInterval)
-	oe.svcReadStopper = make(chan struct{})
+func (e *Edge) startReadingServices() {
+	ticker := time.NewTicker(e.svcReadInterval)
+	e.svcReadChan = make(chan struct{})
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
-				services, err := oe.clientset.CoreV1().Services("").List(metaV1.ListOptions{})
+				services, err := e.clientset.CoreV1().Services("").List(metaV1.ListOptions{})
 				if err != nil {
+					log.Errorf("couldn't read locally running Kubernetes services: %v\n", err)
 					continue
 				}
-				serviceDomains := make([]string, len(services.Items))
-				for i, service := range services.Items {
-					serviceDomains[i] = generateServiceDNS(&service)
+				serviceSet := make(Set)
+				for _, service := range services.Items {
+					serviceSet[generateServiceDNS(&service)] = exists
 				}
-				oe.services.Overwrite(serviceDomains)
-			case <-oe.svcReadStopper:
+				e.services.Overwrite(serviceSet)
+				e.table.Update(e.ip, e.geoCoords, serviceSet)
+			case <-e.svcReadChan:
 				ticker.Stop()
 				return
 			}
@@ -33,11 +36,11 @@ func (oe *OptikonEdge) startReadingServices() {
 }
 
 // Generates a services DNS that looks like my-svc.my-namespace.svc.cluster.external
-func generateServiceDNS(svc *v1.Service) string {
-	return svc.GetName() + "." + svc.GetNamespace() + ".svc.cluster.external"
+func generateServiceDNS(svc *v1.Service) ServiceDNS {
+	return ServiceDNS(fmt.Sprintf("%s.%s.svc.cluster.external", svc.GetName(), svc.GetNamespace()))
 }
 
-// Stops reading Kubernetes services into local state.
-func (oe *OptikonEdge) stopReadingServices() {
-	close(oe.svcReadStopper)
+// Stops reading local Kubernetes services.
+func (e *Edge) stopReadingServices() {
+	close(e.svcReadChan)
 }

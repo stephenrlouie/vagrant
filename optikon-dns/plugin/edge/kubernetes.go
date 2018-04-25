@@ -1,4 +1,4 @@
-package central
+package edge
 
 import (
 	"k8s.io/client-go/kubernetes"
@@ -9,11 +9,11 @@ import (
 func RegisterKubernetesClient() (*kubernetes.Clientset, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		panic(err.Error())
+		return nil, err
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		panic(err.Error())
+		return nil, err
 	}
 	return clientset, nil
 }
