@@ -30,6 +30,7 @@ def provision_vm(config, vm_name, i)
     config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/kube-dns-svc.yaml"
     config.vm.provision "file", source: "optikon-dns/manifests/kube-dns-depl.yaml", destination: "/home/vagrant/.coredns/kube-dns-depl.yaml"
     config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/kube-dns-depl.yaml --force"
+    config.vm.provision "file", source: "optikon-dns/manifests/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
 end
 
 Vagrant.configure("2") do |config|
@@ -56,14 +57,14 @@ Vagrant.configure("2") do |config|
                 config.vm.provision "shell", path: "scripts/deploy-registry.sh", privileged: true
                 config.vm.provision "shell", path: "scripts/deploy-optikon.sh", privileged: true
 
-                config.vm.provision "file", source: "optikon-dns/plugin/central/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell,
                     path: "scripts/replace-env-vars.sh",
                     env: {
                         "MY_IP" => "172.16.7.#{i+100}",
                         "LON" => $central_cluster_coords[0],
                         "LAT" => $central_cluster_coords[1],
-                        "SVC_READ_INTERVAL" => $svc_read_interval
+                        "SVC_READ_INTERVAL" => $svc_read_interval,
+                        "SVC_PUSH_INTERVAL" => $svc_push_internal
                     }
                 config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
@@ -77,12 +78,11 @@ Vagrant.configure("2") do |config|
                 config.vm.provision "file", source: "scripts/inject-kubeconfig.py", destination: "/home/vagrant/inject-kubeconfig.py"
                 config.vm.provision "file", source: "scripts/edge-#{i-1}.json", destination: "/home/vagrant/edge-#{i-1}.json"
                 config.vm.provision "shell", path: "scripts/post-to-optikon.sh", :args => "/home/vagrant/edge-#{i-1}.json"
-                config.vm.provision "file", source: "optikon-dns/plugin/edge/corefile.yaml", destination: "/home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell,
                     path: "scripts/replace-env-vars.sh",
                     env: {
                         "MY_IP" => "172.16.7.#{i+100}",
-                        "CENTRAL_IP" => "172.16.7.101",
+                        "UPSTREAMS" => "172.16.7.101:53",
                         "LON" => $edge_cluster_coords[2*(i-2)],
                         "LAT" => $edge_cluster_coords[2*(i-2)+1],
                         "SVC_READ_INTERVAL" => $svc_read_interval,
