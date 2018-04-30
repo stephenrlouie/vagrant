@@ -12,8 +12,7 @@ $box_version = ENV["VM_VERSION"] || "1.2.0"
 $central_cluster_coords = (ENV["CENTRAL_CLUSTER_COORDS"] || "55.692770,12.598624").split(/\s*,\s*/)
 $edge_cluster_coords = (ENV["EDGE_CLUSTER_COORDS"] || "55.664023,12.610126,55.680770,12.543006,55.6748923,12.5534").split(/\s*,\s*/)
 
-$svc_read_interval = 2
-$svc_push_internal = 4
+$debug_levels = "{\n        dns_debug\n        service_debug\n    }\n"
 
 def provision_vm(config, vm_name, i)
     config.vm.hostname = vm_name
@@ -63,8 +62,7 @@ Vagrant.configure("2") do |config|
                         "MY_IP" => "172.16.7.#{i+100}",
                         "LON" => $central_cluster_coords[0],
                         "LAT" => $central_cluster_coords[1],
-                        "SVC_READ_INTERVAL" => $svc_read_interval,
-                        "SVC_PUSH_INTERVAL" => $svc_push_internal
+                        "DEBUG_LEVELS" => $debug_levels
                     }
                 config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
@@ -85,8 +83,7 @@ Vagrant.configure("2") do |config|
                         "UPSTREAMS" => "172.16.7.101:53",
                         "LON" => $edge_cluster_coords[2*(i-2)],
                         "LAT" => $edge_cluster_coords[2*(i-2)+1],
-                        "SVC_READ_INTERVAL" => $svc_read_interval,
-                        "SVC_PUSH_INTERVAL" => $svc_push_internal
+                        "DEBUG_LEVELS" => $debug_levels
                     }
                 config.vm.provision :shell, inline: "kubectl -n kube-system replace -f /home/vagrant/.coredns/corefile.yaml"
                 config.vm.provision :shell, path: "scripts/trigger-coredns-reload.sh"
